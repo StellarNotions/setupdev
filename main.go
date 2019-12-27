@@ -3,24 +3,41 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/gorilla/mux"
 )
 
-const SetupPackageBasePath string = "./setupPackages"
+const ENVFilePath string = "./"
+const ENVFileName string = ".env.json"
+
+var ENV ENVStruct
+
+type ENVStruct struct {
+	AWS struct {
+		Credentials struct {
+			AccessKeyId  string `json:"ACCESS_KEY_ID"`
+			SecretKey    string `json:"SECRET_ACCESS_KEY"`
+		}
+		S3 struct {
+			BucketName   string `json:"BUCKET_NAME"`
+			Region       string `json:"REGION"`
+		}
+	}
+	SetupPackageBasePath string `json:"SETUP_PACKAGE_BASE_PATH"`
+}
 
 type notFoundHttpResponse struct {
 	Msg string `json:"msg"`
-}
-
-type foundHttpResponse struct {
-	Msg                  string `json:"msg"`
-	SetupPackageFileName string `json:"setupPackageFileName"`
 }
 
 type setupPackage struct {
@@ -32,7 +49,7 @@ type allSetupPackages []setupPackage
 var setupPackages = allSetupPackages{
 
 	{
-		FileName: "nodejs_12-14-0_ubuntu.zip",
+		FileName: "nodejs_12-14-0_ubuntu_v1.zip",
 	},
 }
 
@@ -50,8 +67,19 @@ var supportedApplications = allSupportedApplications{
 		Name:                 "nodejs",
 		Version:              "12.14.0",
 		OperatingSystem:      "ubuntu",
-		SetupPackageFileName: "nodejs_12-14-0_ubuntu.zip",
+		SetupPackageFileName: "nodejs_12-14-0_ubuntu_v1.zip",
 	},
+}
+
+func loadENVs(filePath, fileName string) bool {
+	ENVFile, err := os.Open(filePath + fileName)
+	defer ENVFile.Close()
+	if err != nil {
+		return false
+	}
+	jsonParser := json.NewDecoder(ENVFile)
+	_ = jsonParser.Decode(&ENV)
+	return true
 }
 
 func homeLink(w http.ResponseWriter, r *http.Request) {
@@ -80,12 +108,12 @@ func findSupportedApplication(packageName, packageVersion, packageOperatingSyste
 	return supportedApplication{}, false, "no application found"
 }
 
-func checkFileExists(filePath, fileName string) (bool, string) {
+func checkFileExistsLocally(filePath, fileName string) (bool, string) {
 	if _, err := os.Stat(filePath + fileName); os.IsNotExist(err) {
 		return false, "file does not exist"
 	}
 
-	return true, "found file"
+	return true, "file found"
 }
 
 func getFileInfo(OpenFile *os.File) (string, string) {
@@ -102,13 +130,50 @@ func getFileInfo(OpenFile *os.File) (string, string) {
 	return FileContentType, FileSize
 }
 
-func getSetupPackageFile(fileName string) (*os.File, string, string, bool, string) {
-	fileExists, msg := checkFileExists(SetupPackageBasePath, fileName)
-	if !fileExists {
-		return nil, "", "", false, msg
+func getFileFromS3(filePath, fileName string) bool {
+	// The session the S3 Downloader will use
+	sess := session.Must(session.NewSession(&aws.Config{
+		//Credentials: credentials.NewStaticCredentials(ENV.AWS.Credentials.AccessKeyId, ENV.AWS.Credentials.SecretKey, ""),
+		Credentials: credentials.NewSharedCredentials("", "default"),
+		Region: aws.String(ENV.AWS.S3.Region),
+	}))
+
+	// Create a downloader with the session and default options
+	downloader := s3manager.NewDownloader(sess)
+
+	// Create a file to write the S3 Object contents to.
+	f, err := os.Create(filePath + "/" + fileName)
+	if err != nil {
+		//return fmt.Errorf("failed to create file %q, %v", filename, err)
+		return false
 	}
 
-	OpenFile, err := os.Open(SetupPackageBasePath + "/" + fileName)
+	// Write the contents of S3 Object to the file
+	n, err := downloader.Download(f, &s3.GetObjectInput{
+		Bucket: aws.String(ENV.AWS.S3.BucketName),
+		Key:    aws.String(fileName),
+	})
+	if err != nil {
+		//return fmt.Errorf("failed to download file, %v", err)
+		//log.Fatal(fmt.Errorf("failed to download file, %v", err))
+		log.Fatal(err)
+		return false
+	}
+	fmt.Printf("file downloaded, %d bytes\n", n)
+	return true
+}
+
+func getSetupPackageFile(fileName string) (*os.File, string, string, bool, string) {
+	fileExists, _ := checkFileExistsLocally(ENV.SetupPackageBasePath, fileName)
+	if !fileExists {
+		ok := getFileFromS3(ENV.SetupPackageBasePath, fileName)
+		if !ok {
+			log.Fatal(ok)
+			panic("unable to get file from S3")
+		}
+	}
+
+	OpenFile, err := os.Open(ENV.SetupPackageBasePath + "/" + fileName)
 	if err != nil {
 		return nil, "", "", false, "setup package file does not exist"
 	}
@@ -156,10 +221,15 @@ func getSetupPackage(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	router := mux.NewRouter()
-	router.HandleFunc("/", homeLink)
-	router.HandleFunc("/{name}/{version}/{operatingSystem}", getSetupPackage)
+	loadedSuccessfully := loadENVs(ENVFilePath, ENVFileName)
+	if !loadedSuccessfully {
+		log.Fatal("Unable to load ENV file")
+	} else {
+		router := mux.NewRouter()
+		router.HandleFunc("/", homeLink)
+		router.HandleFunc("/{name}/{version}/{operatingSystem}", getSetupPackage)
 
-	fmt.Print("Running on port 8080...")
-	log.Fatal(http.ListenAndServe(":8080", router))
+		fmt.Print("Running on port 8080...")
+		log.Fatal(http.ListenAndServe(":8080", router))
+	}
 }
