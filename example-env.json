@@ -1,0 +1,13 @@
+{
+  "AWS": {
+    "CREDENTIALS": {
+      "ACCESS_KEY_ID": "",
+      "SECRET_ACCESS_KEY": ""
+    },
+    "S3": {
+      "BUCKET_NAME": "",
+      "REGION": ""
+    }
+  },
+  "SETUP_PACKAGE_BASE_PATH": "setupPackages"
+}
