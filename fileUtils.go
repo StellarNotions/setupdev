@@ -29,7 +29,7 @@ func getFileInfo(OpenFile *os.File) (string, string) {
 	// Get content type of file
 	FileContentType := http.DetectContentType(FileHeader)
 	// Get the file size
-	FileStat, _ := OpenFile.Stat()                     // Get info from file
+	FileStat, _ := OpenFile.Stat()                           // Get info from file
 	FileSize := strconv.FormatInt(FileStat.Size(), 10) // Get file size as a string
 
 	return FileContentType, FileSize
@@ -38,7 +38,6 @@ func getFileInfo(OpenFile *os.File) (string, string) {
 func getFileFromS3(filePath, fileName string) bool {
 	// The session the S3 Downloader will use
 	sess := session.Must(session.NewSession(&aws.Config{
-		//Credentials: credentials.NewStaticCredentials(ENV.AWS.Credentials.AccessKeyId, ENV.AWS.Credentials.SecretKey, ""),
 		Credentials: credentials.NewSharedCredentials("", "default"),
 		Region: aws.String(ENV.AWS.S3.Region),
 	}))

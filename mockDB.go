@@ -10,13 +10,15 @@ import (
 
 type setupPackage struct {
 	FileName string `json:"fileName"`
+	Version  string `json:"version"`
 }
 
 type allSetupPackages []setupPackage
 
 var setupPackages = allSetupPackages{
 	{
-		FileName: "nodejs_12-14-0_ubuntu_v1.zip",
+		FileName: "nodejs_12-14-0_ubuntu_1.zip",
+		Version:  "1",
 	},
 }
 
